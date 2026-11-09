@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MoltKeeper — Jurnal Molt Tarantula</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", system-ui, sans-serif;
+      background: #14121a; color: #e8e4f0; min-height: 100vh;
+    }
+    header {
+      padding: 24px 32px; background: #1e1a29;
+      border-bottom: 1px solid #3a3350;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { margin: 0; font-size: 1.4rem; }
+    header .spider { font-size: 1.8rem; }
+    #status {
+      margin-left: auto; font-size: 0.85rem; padding: 6px 14px;
+      border-radius: 999px; background: #2a2438; border: 1px solid #3a3350;
+    }
+    #status.ok { color: #7ee787; border-color: #2ea043; }
+    #status.down { color: #ff7b72; border-color: #f85149; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+    section {
+      background: #1e1a29; border: 1px solid #3a3350;
+      border-radius: 12px; padding: 20px; margin-bottom: 24px;
+    }
+    h2 { margin: 0 0 16px; font-size: 1.05rem; color: #c4b5fd; }
+    .grid {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; color: #a89ec4; }
+    input, textarea, select {
+      background: #14121a; border: 1px solid #3a3350; color: #e8e4f0;
+      border-radius: 8px; padding: 9px 12px; font: inherit; width: 100%;
+    }
+    input:focus, textarea:focus { outline: 1px solid #8b5cf6; }
+    textarea { resize: vertical; min-height: 60px; grid-column: 1 / -1; }
+    button {
+      margin-top: 14px; background: #8b5cf6; color: #fff; border: none;
+      border-radius: 8px; padding: 10px 22px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #7c3aed; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #2c2740; }
+    th { color: #a89ec4; font-weight: 600; }
+    td .badge {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      background: #2a2438; border: 1px solid #3a3350; font-size: 0.75rem;
+    }
+    .kosong { color: #6f6590; font-style: italic; padding: 12px 0; }
+    #pesan { margin-top: 12px; font-size: 0.85rem; min-height: 1.2em; }
+    #pesan.gagal { color: #ff7b72; }
+    #pesan.sukses { color: #7ee787; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="spider">🕷️</span>
+    <h1>MoltKeeper</h1>
+    <span id="status">memeriksa…</span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Catat Molt Baru</h2>
+      <form id="form-molt">
+        <div class="grid">
+          <label>Nama Tarantula
+            <input name="nama_tarantula" required maxlength="100" placeholder="mis. Mochnacz" />
+          </label>
+          <label>Spesies
+            <input name="spesies" required maxlength="150" placeholder="mis. Grammostola pulchripes" />
+          </label>
+          <label>Instar
+            <input name="instar" maxlength="50" placeholder="mis. 7Fi" />
+          </label>
+          <label>Leg Span (cm)
+            <input name="leg_span_cm" type="number" step="0.1" min="0" max="30" placeholder="6.5" />
+          </label>
+          <label>Tanggal Molt
+            <input name="tanggal_molt" type="date" />
+          </label>
+          <label>Catatan
+            <textarea name="catatan" maxlength="500" placeholder="fangs baru sudah menghitam, belum diberi pakan…"></textarea>
+          </label>
+        </div>
+        <button type="submit" id="btn-simpan">Simpan ke PostgreSQL</button>
+        <p id="pesan"></p>
+      </form>
+    </section>
+
+    <section>
+      <h2>Riwayat Molt</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Nama</th><th>Spesies</th><th>Instar</th>
+            <th>Leg Span</th><th>Tanggal</th><th>Catatan</th>
+          </tr>
+        </thead>
+        <tbody id="tabel-data"></tbody>
+      </table>
+      <p class="kosong" id="kosong">Belum ada catatan.</p>
+    </section>
+  </main>
+
+  <script>
+    const $status = document.getElementById("status");
+    const $tabel = document.getElementById("tabel-data");
+    const $kosong = document.getElementById("kosong");
+    const $pesan = document.getElementById("pesan");
+    const $form = document.getElementById("form-molt");
+
+    async function cekHealth() {
+      try {
+        const r = await fetch("/health");
+        if (!r.ok) throw new Error(r.status);
+        const j = await r.json();
+        $status.textContent = `● API ${j.status} · DB ${j.database}`;
+        $status.className = "ok";
+      } catch {
+        $status.textContent = "● API tidak terjangkau";
+        $status.className = "down";
+      }
+    }
+
+    async function muatData() {
+      try {
+        const r = await fetch("/baca-data");
+        const data = await r.json();
+        $tabel.innerHTML = data.map(d => `
+          <tr>
+            <td>${d.id}</td>
+            <td>${escapeHtml(d.nama_tarantula)}</td>
+            <td><span class="badge">${escapeHtml(d.spesies)}</span></td>
+            <td>${escapeHtml(d.instar ?? "-")}</td>
+            <td>${d.leg_span_cm ?? "-"} cm</td>
+            <td>${d.tanggal_molt ?? "-"}</td>
+            <td>${escapeHtml(d.catatan ?? "-")}</td>
+          </tr>`).join("");
+        $kosong.style.display = data.length ? "none" : "block";
+      } catch {
+        $kosong.textContent = "Gagal memuat data dari server.";
+        $kosong.style.display = "block";
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c =>
+        c === "&" ? "&" + "amp;" :
+        c === "<" ? "&" + "lt;" :
+        c === ">" ? "&" + "gt;" :
+        c === '"' ? "&" + "quot;" : "&" + "#39;");
+    }
+
+    $form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("btn-simpan");
+      btn.disabled = true;
+      $pesan.textContent = "Menyimpan…";
+      $pesan.className = "";
+
+      const fd = new FormData($form);
+      const payload = {
+        nama_tarantula: fd.get("nama_tarantula").trim(),
+        spesies: fd.get("spesies").trim(),
+        instar: fd.get("instar").trim() || null,
+        leg_span_cm: fd.get("leg_span_cm") ? Number(fd.get("leg_span_cm")) : null,
+        tanggal_molt: fd.get("tanggal_molt") || null,
+        catatan: fd.get("catatan").trim() || null,
+      };
+
+      try {
+        const r = await fetch("/tulis-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail ? JSON.stringify(err.detail) : `HTTP ${r.status}`);
+        }
+        $pesan.textContent = "Catatan tersimpan.";
+        $pesan.className = "sukses";
+        $form.reset();
+        await muatData();
+      } catch (err) {
+        $pesan.textContent = `Gagal: ${err.message}`;
+        $pesan.className = "gagal";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    cekHealth();
+    muatData();
+    setInterval(cekHealth, 30000);
+  </script>
+</body>
+</html>
