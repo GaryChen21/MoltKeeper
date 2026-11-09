@@ -1,0 +1,58 @@
+# Catatan molt tarantula dalam container
+name: moltkeeper
+
+services:
+  # ---------- SERVICE 1: DATABASE POSTGRESQL ----------
+  db:
+    image: postgres:16.4-alpine   # tag versi spesifik, bukan :latest
+    container_name: moltkeeper-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Named volume: data PostgreSQL bertahan meski container dibuang
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - jaringan-moltkeeper
+    # Healthcheck: compose menunggu DB benar-benar siap
+    # sebelum service app di-start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------- SERVICE 2: APLIKASI (FASTAPI) ----------
+  app:
+    build: .
+    container_name: moltkeeper-app
+    restart: unless-stopped
+    # Muat seluruh isi file .env ke environment container
+    env_file:
+      - .env
+    environment:
+      # host = "db" : nama service, di-resolve oleh user-defined network
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    ports:
+      - "8000:8000"   # host:container
+    networks:
+      - jaringan-moltkeeper
+    # App baru dijalankan SETELAH db lulus healthcheck,
+    # bukan sekadar proses postgres sudah start
+    depends_on:
+      db:
+        condition: service_healthy
+
+# ---------- NAMED VOLUME ----------
+volumes:
+  pgdata:
+
+# ---------- USER-DEFINED NETWORK ----------
+# Jaringan terisolasi milik project ini; service saling
+# menghubungi lewat nama service (DNS internal Docker)
+networks:
+  jaringan-moltkeeper:
+    driver: bridge
